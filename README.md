@@ -65,8 +65,18 @@ visible, e.g. 8% used would draw a *half-filled* arc.
 
 The patch replaces the pie renderer with a **continuous arc** (`stroke-dashoffset`
 on a circle: 20×20 viewBox, center 10,10, r=5, circumference ≈31.42), exact at
-every percentage. It keeps the same colors (`currentColor` background ring +
-`--app-claude-clay-button-orange` fill), so theming is unchanged.
+every percentage. The faint background ring is unchanged (`currentColor` at 0.15
+opacity); only the **filled arc** is recolored by **context used**, traffic-light
+style:
+
+| context used | arc color |
+|---|---|
+| < 30% | green `#3fb950` |
+| 30–50% | yellow `#d29922` |
+| > 50% | red `#f85149` |
+
+Edit the `col=...` ternary in the `continuous-pie` `patched` string in
+`scripts/patch_gauge.py` to change thresholds or colors.
 
 > **Fragility note.** Unlike the visibility guard (which matches *semantic* code),
 > the pie fix matches **minified identifiers** (`Iet`, `WEt`, `HEt`, `VEt`) that

@@ -93,14 +93,16 @@ TRANSFORMS = [
         ),
         "patched": (
             'function Iet({percentage:e,className:t}){/*gauge-always*/'
-            'let p=Math.max(0,Math.min(100,e)),C=31.4159,off=C*(1-p/100);'
+            'let p=Math.max(0,Math.min(100,e)),C=31.4159,off=C*(1-p/100),'
+            # color by USED %: <30 green, 30-50 yellow, >50 red (traffic-light)
+            'col=p<30?"#3fb950":p<=50?"#d29922":"#f85149";'
             'return oG.default.createElement("svg",{width:"20",height:"20",'
             'viewBox:"0 0 20 20",fill:"none",xmlns:"http://www.w3.org/2000/svg",'
             'className:t,style:{display:"block"}},oG.default.createElement('
             '"circle",{cx:"10",cy:"10",r:"5",stroke:"currentColor",'
             'strokeOpacity:"0.15",strokeWidth:"1.5"}),oG.default.createElement('
             '"circle",{cx:"10",cy:"10",r:"5",'
-            'stroke:"var(--app-claude-clay-button-orange)",strokeWidth:"1.5",'
+            'stroke:col,strokeWidth:"1.5",'
             'strokeLinecap:"round",strokeDasharray:C,strokeDashoffset:off,'
             'transform:"rotate(-90 10 10)"}'
         ),
