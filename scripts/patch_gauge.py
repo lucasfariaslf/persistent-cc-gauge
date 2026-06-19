@@ -107,6 +107,22 @@ TRANSFORMS = [
             'transform:"rotate(-90 10 10)"}'
         ),
     },
+    {
+        "name": "prefetch-on-mount",
+        # Optional (matches a minified component name): when the input footer
+        # mounts, ask the core for a fresh usage update so the gauge shows real
+        # numbers as soon as you open/return to a session, instead of waiting for
+        # the first model response. requestUsageUpdate() is a NO-OP if the core
+        # isn't connected yet (no eager launch), so this is free on a cold window
+        # and just degrades to the existing "appears after first response".
+        "optional": True,
+        "orig": "onTerminalCollaborator:h}){Xn();",
+        "patched": (
+            "onTerminalCollaborator:h}){Xn();"
+            "/*gauge-always*/tp.useEffect(()=>{"
+            "try{e.requestUsageUpdate?.()}catch{}},[]);"
+        ),
+    },
 ]
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "patch_gauge.log")
@@ -175,10 +191,13 @@ def apply_one(path: str, dry_run: bool) -> str:
     new = data
     applied, warns = [], []
     for t in TRANSFORMS:
+        # Check "already patched" FIRST. Some transforms have an `orig` that is a
+        # substring of their `patched` (we keep the anchor and append to it), so
+        # counting `orig` after patching would still be >=1 and re-apply forever.
+        if t["patched"] in new:
+            continue                               # already done
         hits = new.count(t["orig"])
         if hits == 0:
-            if t["patched"] in new:
-                continue                           # already done
             # Original form absent. For optional transforms this is just a
             # version mismatch -> warn and skip. For required ones it's fatal.
             if t.get("optional"):

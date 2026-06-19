@@ -88,6 +88,22 @@ Edit the `col=...` ternary in the `continuous-pie` `patched` string in
 > update the `continuous-pie` `orig` string in `scripts/patch_gauge.py` to match
 > that version's pie renderer.
 
+### Third change: prepopulate usage on open
+
+By default the gauge only gets numbers once the model first responds. The patch
+injects a one-time `useEffect` into the input footer that calls the extension's
+own `requestUsageUpdate()` when the panel mounts, so the gauge shows real usage
+as soon as you **open or return to a session** — then it keeps updating as you
+chat (the live data overwrites it).
+
+This is deliberately the **cheap** version: `requestUsageUpdate()` is a no-op if
+the Claude core isn't connected yet (it does **not** eagerly launch the core), so
+on a truly cold window it costs nothing and simply degrades to the old "appears
+after first response." It's wrapped in `try/catch` and an optional call
+(`?.()`) so it can never break the footer render. Like the pie, it's marked
+**optional** — if the footer component's minified name drifts, it's skipped with
+a warning and the other fixes still apply.
+
 ### Why it needs to re-apply on every update
 
 VSCode installs each extension version into its own folder
