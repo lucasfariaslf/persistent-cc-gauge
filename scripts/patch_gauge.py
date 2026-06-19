@@ -51,13 +51,61 @@ import os
 import sys
 import time
 
-# The original guard block (two statements) and the replacement we swap in.
-# ORIGINAL hides the gauge until >=50% used; PATCHED shows it at every level but
-# still hides the "no data yet" state (used tokens or window not reported).
-# The /*gauge-always*/ marker makes the patch detectable for idempotency/restore.
-ORIGINAL = "if(t===0)return null;if(c>=50)return null"
-PATCHED = "if(t<=0||e<=0)return null/*gauge-always*/"
+# Each transform is an exact, unique string we swap (orig -> patched). The
+# marker comments make every transform detectable for idempotency and --restore.
+#
+# 1) VISIBILITY guard. Original hides the gauge until >=50% used; the 50% gate
+#    also (accidentally) hid the "no data yet" state. We replace BOTH guards with
+#    one correct empty-state guard: show at every level, but stay hidden until the
+#    model has actually reported token usage (no fake 0%/100% flash).
+#
+# 2) PIE renderer. The original pie (Iet) snaps the percentage into just three
+#    coarse buckets (50/75/99) via WEt() and looks up a pre-rendered SVG arc. It
+#    has NO geometry below 50%, because the gauge was never shown there. Once the
+#    gauge is always visible, any low value (e.g. 8%) draws a half-filled arc.
+#    We replace Iet with a continuous stroke-dashoffset arc that is exact at every
+#    percentage (geometry: 20x20 viewBox, center 10,10, r=5, circumference ~31.42).
 MARKER = "/*gauge-always*/"
+
+TRANSFORMS = [
+    {
+        "name": "visibility-guard",
+        "orig": "if(t===0)return null;if(c>=50)return null",
+        "patched": "if(t<=0||e<=0)return null/*gauge-always*/",
+    },
+    {
+        "name": "continuous-pie",
+        # Optional: this transform matches MINIFIED identifiers (Iet/WEt/HEt/VEt)
+        # that change between releases, so it may not match every version. When it
+        # doesn't, we WARN and still apply the (robust) visibility guard rather
+        # than failing the whole file. Without it the gauge still shows correct
+        # numbers; only the pie's fill is coarse below 50%.
+        "optional": True,
+        "orig": (
+            'function Iet({percentage:e,className:t}){let i=WEt(e),n=VEt[i];'
+            'return oG.default.createElement("svg",{width:"20",height:"20",'
+            'viewBox:"0 0 20 20",fill:"none",xmlns:"http://www.w3.org/2000/svg",'
+            'className:t,style:{display:"block"}},n&&oG.default.createElement('
+            '"path",{d:n,stroke:"currentColor",strokeOpacity:"0.15",'
+            'strokeWidth:"1.5",strokeLinecap:"round"}),oG.default.createElement('
+            '"path",{d:HEt[i],stroke:"var(--app-claude-clay-button-orange)",'
+            'strokeWidth:"1.5",strokeLinecap:"round"}'
+        ),
+        "patched": (
+            'function Iet({percentage:e,className:t}){/*gauge-always*/'
+            'let p=Math.max(0,Math.min(100,e)),C=31.4159,off=C*(1-p/100);'
+            'return oG.default.createElement("svg",{width:"20",height:"20",'
+            'viewBox:"0 0 20 20",fill:"none",xmlns:"http://www.w3.org/2000/svg",'
+            'className:t,style:{display:"block"}},oG.default.createElement('
+            '"circle",{cx:"10",cy:"10",r:"5",stroke:"currentColor",'
+            'strokeOpacity:"0.15",strokeWidth:"1.5"}),oG.default.createElement('
+            '"circle",{cx:"10",cy:"10",r:"5",'
+            'stroke:"var(--app-claude-clay-button-orange)",strokeWidth:"1.5",'
+            'strokeLinecap:"round",strokeDasharray:C,strokeDashoffset:off,'
+            'transform:"rotate(-90 10 10)"}'
+        ),
+    },
+]
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "patch_gauge.log")
 
@@ -122,18 +170,36 @@ def apply_one(path: str, dry_run: bool) -> str:
     except OSError as exc:
         return f"error:read {exc}"
 
-    hits = data.count(ORIGINAL)
-    if hits == 0:
-        if MARKER in data:
-            return "already"
-        return "no-guard-block (bundle changed? see README)"
-    if hits > 1:
-        return f"error:guard-block-found-{hits}-times (refusing to guess)"
+    new = data
+    applied, warns = [], []
+    for t in TRANSFORMS:
+        hits = new.count(t["orig"])
+        if hits == 0:
+            if t["patched"] in new:
+                continue                           # already done
+            # Original form absent. For optional transforms this is just a
+            # version mismatch -> warn and skip. For required ones it's fatal.
+            if t.get("optional"):
+                warns.append(t["name"] + "?")
+                continue
+            return f"error:{t['name']} not-found (bundle changed? see README)"
+        if hits > 1:
+            if t.get("optional"):
+                warns.append(t["name"] + "x" + str(hits))
+                continue
+            return f"error:{t['name']} found-{hits}-times (refusing to guess)"
+        new = new.replace(t["orig"], t["patched"], 1)
+        applied.append(t["name"])
 
+    suffix = ""
+    if warns:
+        suffix = " [skipped: " + ",".join(warns) + "]"
+    if not applied:
+        return "already" + suffix
     if dry_run:
-        return "would-patch"
-    atomic_write(path, data.replace(ORIGINAL, PATCHED, 1))
-    return "patched"
+        return "would-patch (" + ",".join(applied) + ")" + suffix
+    atomic_write(path, new)
+    return "patched (" + ",".join(applied) + ")" + suffix
 
 
 def restore_one(path: str, dry_run: bool) -> str:
@@ -143,12 +209,19 @@ def restore_one(path: str, dry_run: bool) -> str:
     except OSError as exc:
         return f"error:read {exc}"
 
-    if PATCHED not in data:
+    new = data
+    reverted = []
+    for t in TRANSFORMS:
+        if t["patched"] in new:
+            new = new.replace(t["patched"], t["orig"], 1)
+            reverted.append(t["name"])
+
+    if not reverted:
         return "not-patched"
     if dry_run:
-        return "would-restore"
-    atomic_write(path, data.replace(PATCHED, ORIGINAL, 1))
-    return "restored"
+        return "would-restore (" + ",".join(reverted) + ")"
+    atomic_write(path, new)
+    return "restored (" + ",".join(reverted) + ")"
 
 
 def main() -> int:
@@ -173,7 +246,7 @@ def main() -> int:
         else:
             result = apply_one(path, args.dry_run)
         log(f"{label(path)}: {result}")
-        if result in ("patched", "restored"):
+        if result.startswith("patched") or result.startswith("restored"):
             changed += 1
 
     log(f"done ({verb}); {changed} file(s) changed this run"

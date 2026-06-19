@@ -55,6 +55,29 @@ detectable (idempotent re-runs, clean `--restore`).
 > usage event returns. That's expected — the data genuinely isn't available in
 > that window.
 
+### Second change: an accurate pie below 50%
+
+The numbers were always computed correctly, but the **pie drawing** wasn't built
+for low values. The original renderer snaps the percentage into just three coarse
+buckets (50 / 75 / 99) and looks up a pre-baked SVG arc — there is **no geometry
+below 50%**, because the gauge was never shown there. So once it's always
+visible, e.g. 8% used would draw a *half-filled* arc.
+
+The patch replaces the pie renderer with a **continuous arc** (`stroke-dashoffset`
+on a circle: 20×20 viewBox, center 10,10, r=5, circumference ≈31.42), exact at
+every percentage. It keeps the same colors (`currentColor` background ring +
+`--app-claude-clay-button-orange` fill), so theming is unchanged.
+
+> **Fragility note.** Unlike the visibility guard (which matches *semantic* code),
+> the pie fix matches **minified identifiers** (`Iet`, `WEt`, `HEt`, `VEt`) that
+> the bundler reassigns on every build — they are not stable across versions. So
+> the pie transform is marked **optional**: if it doesn't match a given version,
+> the script prints `[skipped: continuous-pie?]`, still applies the visibility
+> guard, and moves on. In that state the gauge still shows the **correct numbers**;
+> only the pie's fill is coarse below 50%. To re-enable it on a new version,
+> update the `continuous-pie` `orig` string in `scripts/patch_gauge.py` to match
+> that version's pie renderer.
+
 ### Why it needs to re-apply on every update
 
 VSCode installs each extension version into its own folder
@@ -123,9 +146,10 @@ After patching + reloading the window, the context pie should appear next to the
 chat input even at low usage. To confirm the file change:
 
 ```bash
-# Should print the marker (patched) and NOT the original 50% gate.
-grep -c 'gauge-always'        ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
-grep -c 'if(c>=50)return null' ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
+# Marker present (patched), original 50% gate gone, continuous pie present.
+grep -c 'gauge-always'         ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
+grep -c 'if(c>=50)return null'  ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
+grep -c 'strokeDashoffset:off'  ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
 ```
 
 The patch script also writes a timestamped log to `scripts/patch_gauge.log`.
