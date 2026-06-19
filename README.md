@@ -23,20 +23,37 @@ The extension's UI is a bundled webview at:
 <vscode-extensions-dir>/anthropic.claude-code-<version>/webview/index.js
 ```
 
-Inside the usage component, one statement hides the gauge while plenty of
-context remains (`c` is the **percent of context remaining**):
+Inside the usage component, two guard statements control visibility (`e` is
+**used tokens**, `t` is the **effective context window**, `c` is the **percent of
+context remaining**):
 
 ```js
-let c = 100 - displayedPercent;
-if (c >= 50) return null;   // <-- hides the gauge until you cross 50% used
+if (t === 0) return null;   // weak "no window" guard
+if (c >= 50) return null;   // the 50% gate — hides the gauge until 50% used
 ```
 
-The patch removes exactly that statement (replacing it with a harmless marker
-comment `/*gauge-always*/`). The adjacent `if (t === 0) return null` guard is
-**kept**, so the gauge still stays hidden before any tokens are counted (no
-meaningless 0% pie at startup).
+The `c >= 50` gate is the one we want gone. But it was also doing double duty: it
+hid the **"no usage reported yet"** state. The extension resets used-tokens to 0
+at the start of each send and only learns the context-window size once the model
+responds, so before that the pie would read a fake-looking **0% used / 100%
+remaining**. (The `t === 0` guard does *not* catch this, because the value passed
+in is `contextWindow - maxOutputTokens - 13000`, i.e. `-13000` before any data.)
 
-That's the entire change: **one statement removed, per installed version.**
+So the patch **replaces both guards with a single correct empty-state guard**:
+
+```js
+if (t <= 0 || e <= 0) return null;   // hide only when there's no real data yet
+```
+
+Result: the gauge shows at **every** usage level (no 50% gate), but stays hidden
+until the model has actually reported token usage — no broken-looking 0%/100%
+flash. A marker comment `/*gauge-always*/` is left in place so the patch is
+detectable (idempotent re-runs, clean `--restore`).
+
+> Note: because used-tokens resets on each send, the gauge briefly disappears in
+> the moments right after you send a message and reappears once the model's first
+> usage event returns. That's expected — the data genuinely isn't available in
+> that window.
 
 ### Why it needs to re-apply on every update
 
@@ -106,7 +123,7 @@ After patching + reloading the window, the context pie should appear next to the
 chat input even at low usage. To confirm the file change:
 
 ```bash
-# Should print the marker (patched) and NOT the gate.
+# Should print the marker (patched) and NOT the original 50% gate.
 grep -c 'gauge-always'        ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
 grep -c 'if(c>=50)return null' ~/.vscode/extensions/anthropic.claude-code-*/webview/index.js
 ```
@@ -135,12 +152,13 @@ version.
 - **It edits a bundled extension file.** That's an unsigned local modification.
   It does not touch your code, settings, or auth; it only flips one UI gate. The
   `--restore` path puts the file back byte-for-byte.
-- **If the extension's bundle changes shape** in a future release (the gate
-  string `if(c>=50)return null` disappears or appears multiple times), the script
-  **refuses to guess** and reports `no-gate` or `error:gate-found-N-times`
-  instead of corrupting the file. If that happens, the gate's surrounding code is
-  documented above — update `GATE` in `scripts/patch_gauge.py` to match the new
-  minified form, or open an issue.
+- **If the extension's bundle changes shape** in a future release (the guard
+  block `if(t===0)return null;if(c>=50)return null` disappears or appears multiple
+  times), the script **refuses to guess** and reports `no-guard-block` or
+  `error:guard-block-found-N-times` instead of corrupting the file. If that
+  happens, the guard's surrounding code is documented above — update `ORIGINAL`
+  and `PATCHED` in `scripts/patch_gauge.py` to match the new minified form, or
+  open an issue.
 - **Writes are atomic** (temp file + `os.replace`), so an interrupted run can't
   leave a half-written bundle.
 - This is a community tweak, not affiliated with or supported by Anthropic.
