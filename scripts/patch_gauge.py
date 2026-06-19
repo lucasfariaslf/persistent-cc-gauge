@@ -108,24 +108,36 @@ TRANSFORMS = [
         ),
     },
     {
-        "name": "prefetch-on-connect",
-        # Optional (matches a minified component name): ask the core for a fresh
-        # usage update so the gauge shows real numbers as soon as you open/return
-        # to a session, instead of waiting for the first model response.
+        "name": "prefetch-context",
+        # Optional (matches a minified component name): on mount, fetch the real
+        # context usage (the same data /context shows) and seed the gauge's
+        # usageData signal so it's populated as soon as you open a session, before
+        # the first model response.
         #
-        # The effect depends on the `connection` signal and only fires once a
-        # connection actually exists. This matters: requestUsageUpdate() is a
-        # no-op when not connected, and on a fresh window reload the footer mounts
-        # BEFORE the core connects -- so a bare [] effect would fire too early and
-        # never retry. Depending on e.connection.value re-runs the effect when the
-        # core connects on its own (no eager launch), populating the gauge then.
+        # Why getContextUsage() and not requestUsageUpdate(): the gauge's data
+        # (totalTokens / contextWindow) is only produced AFTER a model turn. While
+        # idle, requestUsageUpdate() returns nothing, so the gauge stays hidden.
+        # getContextUsage() instead forces the core to COMPUTE the baseline on
+        # demand (it calls launchClaude()), returning {totalTokens, rawMaxTokens,
+        # percentage, ...}. We map those into usageData so the gauge renders. The
+        # next real turn overwrites these with the model's live values.
+        #
+        # COST: this eagerly launches the Claude core when the panel mounts, even
+        # if you don't end up chatting. That's the deliberate tradeoff for showing
+        # usage on a cold/idle session. Wrapped in try/catch + optional-call so it
+        # can never break the footer; runs once on mount ([]).
         "optional": True,
         "orig": "onTerminalCollaborator:h}){Xn();",
         "patched": (
             "onTerminalCollaborator:h}){Xn();"
             "/*gauge-always*/tp.useEffect(()=>{try{"
-            "if(e.connection.value)e.requestUsageUpdate?.()"
-            "}catch{}},[e.connection.value]);"
+            "e.getContextUsage?.().then(r=>{"
+            "let u=r&&r.usage;if(!u)return;"
+            "e.usageData.value={...e.usageData.value,"
+            "totalTokens:u.totalTokens,contextWindow:u.rawMaxTokens,"
+            "maxOutputTokens:0};"
+            "}).catch(()=>{});"
+            "}catch{}},[]);"
         ),
     },
 ]

@@ -90,22 +90,28 @@ Edit the `col=...` ternary in the `continuous-pie` `patched` string in
 
 ### Third change: prepopulate usage on open
 
-By default the gauge only gets numbers once the model first responds. The patch
-injects a `useEffect` into the input footer that calls the extension's own
-`requestUsageUpdate()` so the gauge shows real usage as soon as you **open or
-return to a session** — then it keeps updating as you chat (live data overwrites
-it).
+By default the gauge only gets numbers once the model first responds, because the
+data it reads (`totalTokens` / `contextWindow`) is only produced **after a model
+turn**. While a session is idle there is simply nothing to show, so the gauge
+stays hidden until you send something.
 
-The important subtlety is **timing**. `requestUsageUpdate()` is a no-op when the
-core isn't connected, and on a fresh window reload the footer mounts *before* the
-core connects — so a naive run-once-on-mount effect fires too early and never
-retries (you'd see nothing). Instead the effect **depends on the `connection`
-signal** (`[e.connection.value]`), so it runs again the moment the core connects
-on its own. That still means **no eager launch** — it only acts once a connection
-naturally exists, costing nothing on a truly cold window. It's wrapped in
-`try/catch` + an optional call (`?.()`) so it can never break the footer render.
-Like the pie, it's **optional** — if the footer component's minified name drifts,
-it's skipped with a warning and the other fixes still apply.
+To fix that, the patch injects a `useEffect` into the input footer that calls the
+extension's own `getContextUsage()` on mount — the **same call `/context` uses**.
+That forces the core to *compute* the baseline on demand (system prompt + tools +
+memory + skills) and returns `{totalTokens, rawMaxTokens, percentage, ...}`. We
+map those into the gauge's `usageData` signal, so the gauge shows real usage as
+soon as you open a session. The next real turn overwrites these with the model's
+live values.
+
+> **Cost / tradeoff.** `getContextUsage()` calls `launchClaude()` internally, so
+> this **eagerly starts the Claude core process when the chat panel mounts**, even
+> if you don't end up chatting. That's the deliberate price of populating an idle
+> gauge — there is no cheaper way, because the numbers don't exist until the core
+> computes them. (We tried `requestUsageUpdate()` first; it's a no-op while idle,
+> so it never populated anything.) The call is wrapped in `try/catch` + an
+> optional call (`?.()`) so it can never break the footer. Like the pie, it's
+> **optional** — if the footer component's minified name drifts, it's skipped with
+> a warning and the other fixes still apply.
 
 ### Why it needs to re-apply on every update
 
