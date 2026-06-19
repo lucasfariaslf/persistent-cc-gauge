@@ -91,18 +91,21 @@ Edit the `col=...` ternary in the `continuous-pie` `patched` string in
 ### Third change: prepopulate usage on open
 
 By default the gauge only gets numbers once the model first responds. The patch
-injects a one-time `useEffect` into the input footer that calls the extension's
-own `requestUsageUpdate()` when the panel mounts, so the gauge shows real usage
-as soon as you **open or return to a session** — then it keeps updating as you
-chat (the live data overwrites it).
+injects a `useEffect` into the input footer that calls the extension's own
+`requestUsageUpdate()` so the gauge shows real usage as soon as you **open or
+return to a session** — then it keeps updating as you chat (live data overwrites
+it).
 
-This is deliberately the **cheap** version: `requestUsageUpdate()` is a no-op if
-the Claude core isn't connected yet (it does **not** eagerly launch the core), so
-on a truly cold window it costs nothing and simply degrades to the old "appears
-after first response." It's wrapped in `try/catch` and an optional call
-(`?.()`) so it can never break the footer render. Like the pie, it's marked
-**optional** — if the footer component's minified name drifts, it's skipped with
-a warning and the other fixes still apply.
+The important subtlety is **timing**. `requestUsageUpdate()` is a no-op when the
+core isn't connected, and on a fresh window reload the footer mounts *before* the
+core connects — so a naive run-once-on-mount effect fires too early and never
+retries (you'd see nothing). Instead the effect **depends on the `connection`
+signal** (`[e.connection.value]`), so it runs again the moment the core connects
+on its own. That still means **no eager launch** — it only acts once a connection
+naturally exists, costing nothing on a truly cold window. It's wrapped in
+`try/catch` + an optional call (`?.()`) so it can never break the footer render.
+Like the pie, it's **optional** — if the footer component's minified name drifts,
+it's skipped with a warning and the other fixes still apply.
 
 ### Why it needs to re-apply on every update
 

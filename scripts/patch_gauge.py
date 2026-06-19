@@ -108,19 +108,24 @@ TRANSFORMS = [
         ),
     },
     {
-        "name": "prefetch-on-mount",
-        # Optional (matches a minified component name): when the input footer
-        # mounts, ask the core for a fresh usage update so the gauge shows real
-        # numbers as soon as you open/return to a session, instead of waiting for
-        # the first model response. requestUsageUpdate() is a NO-OP if the core
-        # isn't connected yet (no eager launch), so this is free on a cold window
-        # and just degrades to the existing "appears after first response".
+        "name": "prefetch-on-connect",
+        # Optional (matches a minified component name): ask the core for a fresh
+        # usage update so the gauge shows real numbers as soon as you open/return
+        # to a session, instead of waiting for the first model response.
+        #
+        # The effect depends on the `connection` signal and only fires once a
+        # connection actually exists. This matters: requestUsageUpdate() is a
+        # no-op when not connected, and on a fresh window reload the footer mounts
+        # BEFORE the core connects -- so a bare [] effect would fire too early and
+        # never retry. Depending on e.connection.value re-runs the effect when the
+        # core connects on its own (no eager launch), populating the gauge then.
         "optional": True,
         "orig": "onTerminalCollaborator:h}){Xn();",
         "patched": (
             "onTerminalCollaborator:h}){Xn();"
-            "/*gauge-always*/tp.useEffect(()=>{"
-            "try{e.requestUsageUpdate?.()}catch{}},[]);"
+            "/*gauge-always*/tp.useEffect(()=>{try{"
+            "if(e.connection.value)e.requestUsageUpdate?.()"
+            "}catch{}},[e.connection.value]);"
         ),
     },
 ]
