@@ -20,6 +20,18 @@ if [[ -z "$PYTHON" ]]; then
   exit 1
 fi
 
+# The background trigger must use a STABLE interpreter, not whatever venv happens
+# to be active in this shell (the patch script is stdlib-only, so any Python 3
+# works). Prefer a system python that won't disappear; fall back to PATH python.
+TRIGGER_PYTHON="$PYTHON"
+for cand in /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  if [[ -x "$cand" ]]; then TRIGGER_PYTHON="$cand"; break; fi
+done
+if [[ -n "${VIRTUAL_ENV:-}" && "$PYTHON" == "$VIRTUAL_ENV"* && "$TRIGGER_PYTHON" == "$VIRTUAL_ENV"* ]]; then
+  echo "warning: only a venv python was found; the auto-repatch trigger will" >&2
+  echo "         depend on $TRIGGER_PYTHON staying present." >&2
+fi
+
 echo ">> Applying the patch to currently-installed versions..."
 "$PYTHON" "$REPO/scripts/patch_gauge.py"
 
@@ -32,7 +44,7 @@ case "$uname_s" in
 
     echo ">> Installing LaunchAgent -> $PLIST_DST"
     mkdir -p "$HOME_DIR/Library/LaunchAgents"
-    sed -e "s|__HOME__|$HOME_DIR|g" -e "s|__REPO__|$REPO|g" \
+    sed -e "s|__HOME__|$HOME_DIR|g" -e "s|__REPO__|$REPO|g" -e "s|__PYTHON__|$TRIGGER_PYTHON|g" \
       "$PLIST_SRC" > "$PLIST_DST"
 
     # Reload cleanly (ignore "not loaded" on first install).
@@ -45,7 +57,7 @@ case "$uname_s" in
     UNIT_DIR="$HOME_DIR/.config/systemd/user"
     echo ">> Installing systemd --user path+service units -> $UNIT_DIR"
     mkdir -p "$UNIT_DIR"
-    sed -e "s|__REPO__|$REPO|g" -e "s|__PYTHON__|$PYTHON|g" -e "s|__HOME__|$HOME_DIR|g" \
+    sed -e "s|__REPO__|$REPO|g" -e "s|__PYTHON__|$TRIGGER_PYTHON|g" -e "s|__HOME__|$HOME_DIR|g" \
       "$REPO/systemd/claude-code-context-gauge.service.template" \
       > "$UNIT_DIR/claude-code-context-gauge.service"
     sed -e "s|__HOME__|$HOME_DIR|g" \

@@ -99,9 +99,10 @@ To fix that, the patch injects a `useEffect` into the input footer that calls th
 extension's own `getContextUsage()` on mount — the **same call `/context` uses**.
 That forces the core to *compute* the baseline on demand (system prompt + tools +
 memory + skills) and returns `{totalTokens, rawMaxTokens, percentage, ...}`. We
-map those into the gauge's `usageData` signal, so the gauge shows real usage as
-soon as you open a session. The next real turn overwrites these with the model's
-live values.
+map those into the gauge's `usageData` signal, so the gauge shows usage as soon as
+you open a session. We seed `maxOutputTokens` as `0`, so the opening figure can
+read a hair lower than it will after the first turn — the first real response
+overwrites it with the model's live values.
 
 > **Cost / tradeoff.** `getContextUsage()` calls `launchClaude()` internally, so
 > this **eagerly starts the Claude core process when the chat panel mounts**, even
@@ -118,9 +119,13 @@ live values.
 VSCode installs each extension version into its own folder
 (`anthropic.claude-code-2.1.183-...`, `...-2.1.184-...`, etc.) and ships a fresh,
 unpatched `index.js` each time. So the tweak has to be re-applied after every
-update. This repo automates that with an OS-level trigger that watches VSCode's
-extension registry file and re-runs the (idempotent) patch the moment a new
-version lands.
+update. This repo automates that with an OS-level trigger that watches VSCode
+stable's `~/.vscode/extensions/extensions.json` and re-runs the (idempotent) patch
+the moment a new version lands.
+
+The patcher itself also covers Insiders, the remote/SSH/WSL server, Cursor, and
+Windsurf — but the auto-trigger only watches **VSCode stable**. For those other
+editors, re-run `scripts/patch_gauge.py` yourself after an update.
 
 ---
 
@@ -208,16 +213,18 @@ version.
 
 ## Notes, caveats, safety
 
-- **It edits a bundled extension file.** That's an unsigned local modification.
-  It does not touch your code, settings, or auth; it only flips one UI gate. The
-  `--restore` path puts the file back byte-for-byte.
-- **If the extension's bundle changes shape** in a future release (the guard
-  block `if(t===0)return null;if(c>=50)return null` disappears or appears multiple
-  times), the script **refuses to guess** and reports `no-guard-block` or
-  `error:guard-block-found-N-times` instead of corrupting the file. If that
-  happens, the guard's surrounding code is documented above — update `ORIGINAL`
-  and `PATCHED` in `scripts/patch_gauge.py` to match the new minified form, or
-  open an issue.
+- **It edits a bundled extension file.** Unsigned local modification of
+  `webview/index.js`: it rewrites the gauge's visibility guard, the pie renderer,
+  and adds a prefetch effect. It does not touch your code, settings, or auth.
+  `--restore` reverts each applied transform to its original string.
+- **The prefetch eagerly launches the Claude core** when the chat panel mounts
+  (see "Third change"). Drop the `prefetch-context` transform if you don't want
+  that.
+- **If the bundle changes shape** in a future release, required transforms report
+  `error:<name> not-found` / `error:<name> found-N-times` and the file is left
+  untouched; optional transforms (pie, prefetch) print `[skipped: <name>?]` and
+  the rest still apply. Update the matching `orig`/`patched` strings in the
+  `TRANSFORMS` list in `scripts/patch_gauge.py`.
 - **Writes are atomic** (temp file + `os.replace`), so an interrupted run can't
   leave a half-written bundle.
 - This is a community tweak, not affiliated with or supported by Anthropic.

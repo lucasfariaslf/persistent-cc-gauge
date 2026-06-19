@@ -12,7 +12,9 @@ param([switch]$Uninstall)
 $ErrorActionPreference = "Stop"
 $repo   = Split-Path -Parent $PSScriptRoot
 $script = Join-Path $repo "scripts\patch_gauge.py"
-$python = (Get-Command python3 -ErrorAction SilentlyContinue) ?? (Get-Command python -ErrorAction SilentlyContinue)
+# Avoid PS7's ?? operator so this also parses under Windows PowerShell 5.1.
+$python = Get-Command python3 -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
 $taskName = "ClaudeCodeContextGauge"
 
 if (-not $python) { throw "python3/python not found on PATH. Install Python 3 and retry." }

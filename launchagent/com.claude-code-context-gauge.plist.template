@@ -17,7 +17,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>__PYTHON__</string>
     <string>__REPO__/scripts/patch_gauge.py</string>
   </array>
 
