@@ -1,0 +1,3 @@
+# Runtime logs written by the patch script / triggers
+scripts/*.log
+*.gauge.tmp

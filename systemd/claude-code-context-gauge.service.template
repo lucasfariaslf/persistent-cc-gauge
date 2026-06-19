@@ -1,0 +1,6 @@
+[Unit]
+Description=Re-apply the always-show Claude Code context gauge patch
+
+[Service]
+Type=oneshot
+ExecStart=__PYTHON__ __REPO__/scripts/patch_gauge.py
