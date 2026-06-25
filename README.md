@@ -23,12 +23,23 @@ Windows).
 ## Why the auto-repatch
 
 Each extension update installs into a new folder with a fresh, unpatched
-`index.js`, so the patch has to run again. The trigger watches the extension
-registry and re-runs the idempotent patcher when a new version lands:
+`index.js`, so the patch has to run again. The trigger re-runs the idempotent
+patcher when a new version lands:
 
 ```
 extension update -> extensions.json changes -> trigger fires -> patch re-applied
 ```
+
+On macOS and Linux the trigger watches `extensions.json` and fires on change.
+Windows has no single-file watcher in Task Scheduler, so it runs at logon and
+every 5 minutes instead; the patch is idempotent, so the repeated runs are
+no-ops once applied.
+
+The trigger keeps patching every future extension version until you run
+`./uninstall.sh`. It re-applies the same patch to whatever the extension ships
+next, without review. The patcher only swaps exact, unique strings (and refuses
+if a match is not unique), is standard-library Python, writes atomically, and is
+fully reversible with `--restore`.
 
 ## What it changes
 
@@ -48,8 +59,10 @@ correct numbers, just a coarse pie and no idle prefetch) and prints
 `scripts/patch_gauge.py`; versions in `SUPPORTED_OPTIONAL_VERSIONS` fail loudly
 if they regress instead of skipping silently.
 
-prefetch-context eagerly launches the Claude core when the panel mounts. Drop
-that transform if you do not want it.
+prefetch-context is more than cosmetic: to populate an idle gauge it calls
+`getContextUsage()` on mount, which eagerly launches the Claude core when the
+chat panel opens, even if you never send a message. Drop that transform if you
+do not want it.
 
 ## Manual use
 
@@ -61,7 +74,18 @@ python3 scripts/patch_gauge.py --restore  # undo
 ```
 
 Covers VSCode, Insiders, the remote/SSH/WSL server, Cursor, and Windsurf. The
-auto-trigger only watches VSCode stable; re-run manually for the others.
+auto-trigger only watches VSCode stable; re-run manually for the others. Keep
+the clone in place: the trigger and `--restore` both run from it.
 
-Modifies a bundled extension file only. Does not touch your code, settings, or
-auth. Writes are atomic. Community tweak, not affiliated with Anthropic.
+## Caveats
+
+Unsupported, use at your own risk. This edits a file Anthropic ships inside the
+Claude Code extension, which is not a documented or supported integration point.
+An update can change the bundle so the optional transforms stop matching, and
+modifying the extension may affect official support. `--restore` reverses the
+transforms in place rather than restoring a saved copy; if you ever need a known-
+good bundle, reinstall the extension.
+
+It does not touch your code, settings, or auth, only the extension's
+`webview/index.js`. Writes are atomic. Community tweak, not affiliated with
+Anthropic; check your own obligations before using it.

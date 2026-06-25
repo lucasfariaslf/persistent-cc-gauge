@@ -13,7 +13,7 @@ the extension, or wire it to the auto-repatch trigger (see README).
 Usage:
     python3 patch_gauge.py            # apply
     python3 patch_gauge.py --restore  # undo
-    python3 patch_gauge.py --dry-run  # preview, change nothing
+    python3 patch_gauge.py --dry-run  # preview; writes nothing, not even the log
 """
 
 import argparse
@@ -147,10 +147,17 @@ def bundle_paths():
     return sorted(set(paths))
 
 
+# Set by --dry-run so log() prints to stdout but does not touch the log file:
+# a dry run must write nothing at all.
+_LOG_TO_FILE = True
+
+
 def log(msg: str) -> None:
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{stamp}] {msg}"
     print(line)
+    if not _LOG_TO_FILE:
+        return
     try:
         with open(LOG, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
@@ -264,8 +271,12 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--restore", action="store_true", help="undo the tweak")
     ap.add_argument("--dry-run", action="store_true",
-                    help="report actions without writing")
+                    help="report actions without writing anything (no log)")
     args = ap.parse_args()
+
+    if args.dry_run:
+        global _LOG_TO_FILE
+        _LOG_TO_FILE = False
 
     paths = bundle_paths()
     if not paths:
