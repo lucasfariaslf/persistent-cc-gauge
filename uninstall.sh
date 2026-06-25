@@ -12,7 +12,7 @@ PYTHON="$(command -v python3 || true)"
 uname_s="$(uname -s)"
 case "$uname_s" in
   Darwin)
-    PLIST_DST="$HOME_DIR/Library/LaunchAgents/com.claude-code-context-gauge.plist"
+    PLIST_DST="$HOME_DIR/Library/LaunchAgents/com.persistent-cc-gauge.plist"
     if [[ -f "$PLIST_DST" ]]; then
       echo ">> Unloading + removing LaunchAgent"
       launchctl unload "$PLIST_DST" 2>/dev/null || true
@@ -20,11 +20,11 @@ case "$uname_s" in
     fi
     ;;
   Linux)
-    if systemctl --user list-unit-files 2>/dev/null | grep -q claude-code-context-gauge.path; then
+    if systemctl --user list-unit-files 2>/dev/null | grep -q persistent-cc-gauge.path; then
       echo ">> Disabling + removing systemd units"
-      systemctl --user disable --now claude-code-context-gauge.path 2>/dev/null || true
-      rm -f "$HOME_DIR/.config/systemd/user/claude-code-context-gauge.path" \
-            "$HOME_DIR/.config/systemd/user/claude-code-context-gauge.service"
+      systemctl --user disable --now persistent-cc-gauge.path 2>/dev/null || true
+      rm -f "$HOME_DIR/.config/systemd/user/persistent-cc-gauge.path" \
+            "$HOME_DIR/.config/systemd/user/persistent-cc-gauge.service"
       systemctl --user daemon-reload
     fi
     ;;

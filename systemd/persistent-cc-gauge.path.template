@@ -4,7 +4,7 @@ Description=Watch VSCode extensions registry for Claude Code updates
 [Path]
 # VSCode rewrites extensions.json on every install/update/uninstall.
 PathChanged=__HOME__/.vscode/extensions/extensions.json
-Unit=claude-code-context-gauge.service
+Unit=persistent-cc-gauge.service
 
 [Install]
 WantedBy=default.target

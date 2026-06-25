@@ -1,11 +1,12 @@
-# Always-show the Claude Code context gauge (VSCode)
+# persistent-cc-gauge
+
+Keep the Claude Code context-usage gauge always visible in VSCode, and keep it
+patched across extension updates.
 
 The Claude Code VSCode extension shows a context-usage pie next to the chat
 input, but only after you have used 50% or more of the context window. Below
-that it renders nothing.
-
-This repo patches the extension's bundled webview so the gauge is always
-visible, and re-applies the patch automatically after extension updates.
+that it renders nothing. This patches the extension's bundled webview so the
+gauge is always visible, and re-applies after each extension update.
 
 ## What it changes
 
@@ -62,8 +63,8 @@ Requires Python 3. No other dependencies.
 macOS / Linux:
 
 ```bash
-git clone <this-repo> claude-code-context-gauge
-cd claude-code-context-gauge
+git clone https://github.com/lucasfariaslf/persistent-cc-gauge.git
+cd persistent-cc-gauge
 ./install.sh
 ```
 
@@ -75,8 +76,8 @@ watching `~/.vscode/extensions/extensions.json`. Then reload the VSCode window
 Windows:
 
 ```powershell
-git clone <this-repo> claude-code-context-gauge
-cd claude-code-context-gauge
+git clone https://github.com/lucasfariaslf/persistent-cc-gauge.git
+cd persistent-cc-gauge
 powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
 ```
 

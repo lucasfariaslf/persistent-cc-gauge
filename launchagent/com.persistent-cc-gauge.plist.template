@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.claude-code-context-gauge</string>
+  <string>com.persistent-cc-gauge</string>
 
   <!-- Re-run the patch whenever the VSCode extensions registry changes.
        VSCode rewrites extensions.json on every install/update/uninstall,

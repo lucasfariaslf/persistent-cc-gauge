@@ -38,9 +38,9 @@ echo ">> Applying the patch to currently-installed versions..."
 uname_s="$(uname -s)"
 case "$uname_s" in
   Darwin)
-    PLIST_SRC="$REPO/launchagent/com.claude-code-context-gauge.plist.template"
-    PLIST_DST="$HOME_DIR/Library/LaunchAgents/com.claude-code-context-gauge.plist"
-    LABEL="com.claude-code-context-gauge"
+    PLIST_SRC="$REPO/launchagent/com.persistent-cc-gauge.plist.template"
+    PLIST_DST="$HOME_DIR/Library/LaunchAgents/com.persistent-cc-gauge.plist"
+    LABEL="com.persistent-cc-gauge"
 
     echo ">> Installing LaunchAgent -> $PLIST_DST"
     mkdir -p "$HOME_DIR/Library/LaunchAgents"
@@ -58,14 +58,14 @@ case "$uname_s" in
     echo ">> Installing systemd --user path+service units -> $UNIT_DIR"
     mkdir -p "$UNIT_DIR"
     sed -e "s|__REPO__|$REPO|g" -e "s|__PYTHON__|$TRIGGER_PYTHON|g" -e "s|__HOME__|$HOME_DIR|g" \
-      "$REPO/systemd/claude-code-context-gauge.service.template" \
-      > "$UNIT_DIR/claude-code-context-gauge.service"
+      "$REPO/systemd/persistent-cc-gauge.service.template" \
+      > "$UNIT_DIR/persistent-cc-gauge.service"
     sed -e "s|__HOME__|$HOME_DIR|g" \
-      "$REPO/systemd/claude-code-context-gauge.path.template" \
-      > "$UNIT_DIR/claude-code-context-gauge.path"
+      "$REPO/systemd/persistent-cc-gauge.path.template" \
+      > "$UNIT_DIR/persistent-cc-gauge.path"
 
     systemctl --user daemon-reload
-    systemctl --user enable --now claude-code-context-gauge.path
+    systemctl --user enable --now persistent-cc-gauge.path
     echo ">> systemd path unit enabled. It will re-patch automatically on every update."
     echo "   (If this is a headless box, you may need: loginctl enable-linger $USER)"
     ;;
