@@ -2,69 +2,46 @@
 """
 Always-show the Claude Code VSCode context-usage gauge.
 
-THE PROBLEM
------------
-The Claude Code VSCode extension hides the little context-usage pie (next to the
-chat input box) until you have used >=50% of the context window. The webview
-bundle gates it with two guard statements inside the usage component:
+Patches the extension's bundled webview/index.js so the context pie is visible
+at every usage level, not only above 50%. Applies three string transforms, each
+marked with /*gauge-always*/ so runs are idempotent and --restore can revert.
 
-    if(t===0)return null      # t = effective context window (see below)
-    if(c>=50)return null      # c = percent of context REMAINING
+Finds every installed claude-code extension across VSCode, Insiders, the
+remote/SSH/WSL server, Cursor, and Windsurf. Run after installing or updating
+the extension, or wire it to the auto-repatch trigger (see README).
 
-`c>=50` is the 50% gate we want gone. But it was ALSO doing double duty: it hid
-the "no usage reported yet" state. At the start of a session and right after you
-hit send, the extension resets used-tokens to 0 and hasn't yet received the
-context-window size from the model, so the pie would read a fake-looking
-"0% used / 100% remaining". The weak `t===0` guard does NOT catch this, because
-the window value passed in is `contextWindow - maxOutputTokens - 13000`, which is
--13000 (not 0) before any data arrives.
-
-THE FIX
--------
-Replace BOTH guards with a single, correct empty-state guard:
-
-    if(t<=0||e<=0)return null   # e = used tokens, t = effective window
-
-This drops the 50% gate (so the gauge shows at every usage level) AND hides the
-gauge until the model has actually reported token usage (no more 0%/100% flash).
-
-This script:
-  * finds EVERY installed claude-code extension (all versions / all arch builds),
-  * patches only the ones that still contain the original guard block,
-  * leaves a marker comment so re-runs are no-ops (idempotent),
-  * can undo the change with --restore (re-installs the original guards).
-
-It is cross-platform: it expands the VSCode extensions dir for macOS, Linux and
-Windows. Run it once after installing/updating the extension, or wire it to the
-auto-repatch trigger for your OS (see the repo README).
-
-USAGE
------
-    python3 patch_gauge.py            # apply the tweak
-    python3 patch_gauge.py --restore  # undo the tweak
-    python3 patch_gauge.py --dry-run  # show what would change, touch nothing
+Usage:
+    python3 patch_gauge.py            # apply
+    python3 patch_gauge.py --restore  # undo
+    python3 patch_gauge.py --dry-run  # preview, change nothing
 """
 
 import argparse
 import glob
+import re
 import os
 import sys
 import time
 
-# Each transform is an exact, unique string we swap (orig -> patched). The
-# marker comments make every transform detectable for idempotency and --restore.
+# Each transform swaps an exact, unique string (orig -> patched). The marker
+# makes every transform detectable for idempotency and --restore.
 #
-# 1) VISIBILITY guard. Original hides the gauge until >=50% used; the 50% gate
-#    also (accidentally) hid the "no data yet" state. We replace BOTH guards with
-#    one correct empty-state guard: show at every level, but stay hidden until the
-#    model has actually reported token usage (no fake 0%/100% flash).
+# 1) visibility-guard: replaces both guards (if(t===0)return null;if(c>=50)
+#    return null) with one empty-state guard (if(t<=0||e<=0)return null). e is
+#    used tokens, t is the effective window. Shows the gauge at every level but
+#    stays hidden until the model reports real usage, avoiding a 0%/100% flash.
+#    Matches stable code, so it works across versions.
 #
-# 2) PIE renderer. The original pie (Iet) snaps the percentage into just three
-#    coarse buckets (50/75/99) via WEt() and looks up a pre-rendered SVG arc. It
-#    has NO geometry below 50%, because the gauge was never shown there. Once the
-#    gauge is always visible, any low value (e.g. 8%) draws a half-filled arc.
-#    We replace Iet with a continuous stroke-dashoffset arc that is exact at every
-#    percentage (geometry: 20x20 viewBox, center 10,10, r=5, circumference ~31.42).
+# 2) continuous-pie: replaces the bucketed pie renderer with a continuous
+#    stroke-dashoffset arc (20x20 viewBox, center 10,10, r=5, circumference
+#    ~31.42), colored by usage. The original only has geometry for 50/75/99.
+#
+# 3) prefetch-context: injects a useEffect calling getContextUsage() on mount so
+#    the gauge is populated on an idle session. This launches the Claude core
+#    when the panel mounts.
+#
+# Transforms 2 and 3 match minified identifiers that change between releases, so
+# they are optional. See SUPPORTED_OPTIONAL_VERSIONS for the fail-loud behavior.
 MARKER = "/*gauge-always*/"
 
 TRANSFORMS = [
@@ -75,64 +52,55 @@ TRANSFORMS = [
     },
     {
         "name": "continuous-pie",
-        # Optional: this transform matches MINIFIED identifiers (Iet/WEt/HEt/VEt)
-        # that change between releases, so it may not match every version. When it
-        # doesn't, we WARN and still apply the (robust) visibility guard rather
-        # than failing the whole file. Without it the gauge still shows correct
-        # numbers; only the pie's fill is coarse below 50%.
+        # Optional: matches minified identifiers that change between releases. On
+        # a non-matching version the gauge still shows correct numbers; only the
+        # pie fill is coarse below 50%.
         "optional": True,
+        # Matched against 2.1.187 (renderer bXe, JSX helpers E/b). Earlier
+        # versions used Iet + oG.default.createElement.
         "orig": (
-            'function Iet({percentage:e,className:t}){let i=WEt(e),n=VEt[i];'
-            'return oG.default.createElement("svg",{width:"20",height:"20",'
-            'viewBox:"0 0 20 20",fill:"none",xmlns:"http://www.w3.org/2000/svg",'
-            'className:t,style:{display:"block"}},n&&oG.default.createElement('
-            '"path",{d:n,stroke:"currentColor",strokeOpacity:"0.15",'
-            'strokeWidth:"1.5",strokeLinecap:"round"}),oG.default.createElement('
-            '"path",{d:HEt[i],stroke:"var(--app-claude-clay-button-orange)",'
-            'strokeWidth:"1.5",strokeLinecap:"round"}'
+            'function bXe({percentage:e,className:t}){let i=z9t(e),n=W9t[i];'
+            'return E("svg",{width:"20",height:"20",viewBox:"0 0 20 20",'
+            'fill:"none",xmlns:"http://www.w3.org/2000/svg",className:t,'
+            'style:{display:"block"},children:[n&&b("path",{d:n,'
+            'stroke:"currentColor",strokeOpacity:"0.15",strokeWidth:"1.5",'
+            'strokeLinecap:"round"}),b("path",{d:V9t[i],'
+            'stroke:"var(--app-claude-clay-button-orange)",strokeWidth:"1.5",'
+            'strokeLinecap:"round"})]})}'
         ),
         "patched": (
-            'function Iet({percentage:e,className:t}){/*gauge-always*/'
+            'function bXe({percentage:e,className:t}){/*gauge-always*/'
             'let p=Math.max(0,Math.min(100,e)),C=31.4159,off=C*(1-p/100),'
-            # color by USED %: <30 green, 30-50 yellow, >50 red (traffic-light)
+            # used %: <30 green, 30-50 yellow, >50 red
             'col=p<30?"#3fb950":p<=50?"#d29922":"#f85149";'
-            'return oG.default.createElement("svg",{width:"20",height:"20",'
-            'viewBox:"0 0 20 20",fill:"none",xmlns:"http://www.w3.org/2000/svg",'
-            'className:t,style:{display:"block"}},oG.default.createElement('
-            '"circle",{cx:"10",cy:"10",r:"5",stroke:"currentColor",'
-            'strokeOpacity:"0.15",strokeWidth:"1.5"}),oG.default.createElement('
-            '"circle",{cx:"10",cy:"10",r:"5",'
-            'stroke:col,strokeWidth:"1.5",'
-            'strokeLinecap:"round",strokeDasharray:C,strokeDashoffset:off,'
-            'transform:"rotate(-90 10 10)"}'
+            'return E("svg",{width:"20",height:"20",viewBox:"0 0 20 20",'
+            'fill:"none",xmlns:"http://www.w3.org/2000/svg",className:t,'
+            'style:{display:"block"},children:[b("circle",{cx:"10",cy:"10",'
+            'r:"5",stroke:"currentColor",strokeOpacity:"0.15",'
+            'strokeWidth:"1.5"}),b("circle",{cx:"10",cy:"10",r:"5",'
+            'stroke:col,strokeWidth:"1.5",strokeLinecap:"round",'
+            'strokeDasharray:C,strokeDashoffset:off,'
+            'transform:"rotate(-90 10 10)"})]})}'
         ),
     },
     {
         "name": "prefetch-context",
-        # Optional (matches a minified component name): on mount, fetch the real
-        # context usage (the same data /context shows) and seed the gauge's
-        # usageData signal so it's populated as soon as you open a session, before
-        # the first model response.
-        #
-        # Why getContextUsage() and not requestUsageUpdate(): the gauge's data
-        # (totalTokens / contextWindow) is only produced AFTER a model turn. While
-        # idle, requestUsageUpdate() returns nothing, so the gauge stays hidden.
-        # getContextUsage() instead forces the core to COMPUTE the baseline on
-        # demand (it calls launchClaude()), returning {totalTokens, rawMaxTokens,
-        # percentage, ...}. We map those into usageData so the gauge renders. The
-        # next real turn overwrites these with the model's live values.
-        #
-        # COST: this eagerly launches the Claude core when the panel mounts, even
-        # if you don't end up chatting. That's the deliberate tradeoff for showing
-        # usage on a cold/idle session. Wrapped in try/catch + optional-call so it
-        # can never break the footer; runs once on mount ([]).
+        # Optional: on mount, call getContextUsage() and seed the gauge's
+        # usageData signal so it shows on an idle session before the first model
+        # reply. getContextUsage() computes the baseline on demand (it launches
+        # the core); requestUsageUpdate() is a no-op while idle. The first real
+        # turn overwrites the seeded values. Wrapped in try/catch and an optional
+        # call so it cannot break the footer; runs once on mount.
         "optional": True,
-        "orig": "onTerminalCollaborator:h}){Xn();",
+        # Matched against 2.1.187 (footer body starts onTerminalCollaborator:h})
+        # {zn();, useEffect minified to pe, session store e). Earlier versions
+        # started {Xn(); + tp.useEffect.
+        "orig": "onTerminalCollaborator:h}){zn();",
         "patched": (
-            "onTerminalCollaborator:h}){Xn();"
-            "/*gauge-always*/tp.useEffect(()=>{try{"
-            "e.getContextUsage?.().then(r=>{"
-            "let u=r&&r.usage;if(!u)return;"
+            "onTerminalCollaborator:h}){zn();"
+            "/*gauge-always*/pe(()=>{try{"
+            "e.getContextUsage?.().then(a=>{"
+            "let u=a&&a.usage;if(!u)return;"
             "e.usageData.value={...e.usageData.value,"
             "totalTokens:u.totalTokens,contextWindow:u.rawMaxTokens,"
             "maxOutputTokens:0};"
@@ -141,6 +109,14 @@ TRANSFORMS = [
         ),
     },
 ]
+
+# Versions where the optional transforms are known to match. An unknown version
+# that skips them is expected (soft warning). A version listed here that skips is
+# a regression, so it fails with a non-zero exit instead of degrading silently.
+# Add a version here after re-matching the optional transforms for it.
+SUPPORTED_OPTIONAL_VERSIONS = {
+    "2.1.187",
+}
 
 LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "patch_gauge.log")
 
@@ -191,6 +167,18 @@ def label(path: str) -> str:
     return path
 
 
+def version_of(path: str) -> str:
+    """Extract the bare semver from a path, e.g. '2.1.187' (or '' if absent).
+
+    Folder names look like 'anthropic.claude-code-2.1.187-darwin-arm64', so we
+    strip the prefix and keep the leading dotted-number run.
+    """
+    name = label(path)
+    rest = name.replace("anthropic.claude-code-", "", 1)
+    m = re.match(r"\d+(?:\.\d+)*", rest)
+    return m.group(0) if m else ""
+
+
 def atomic_write(path: str, data: str) -> None:
     tmp = path + ".gauge.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -205,6 +193,11 @@ def apply_one(path: str, dry_run: bool) -> str:
     except OSError as exc:
         return f"error:read {exc}"
 
+    # On a version we've declared supported, an OPTIONAL transform that fails to
+    # match is a silent regression, not an expected version skip -> treat it as a
+    # hard error so the run fails loudly instead of degrading unnoticed.
+    fail_closed = version_of(path) in SUPPORTED_OPTIONAL_VERSIONS
+
     new = data
     applied, warns = [], []
     for t in TRANSFORMS:
@@ -215,14 +208,18 @@ def apply_one(path: str, dry_run: bool) -> str:
             continue                               # already done
         hits = new.count(t["orig"])
         if hits == 0:
-            # Original form absent. For optional transforms this is just a
-            # version mismatch -> warn and skip. For required ones it's fatal.
-            if t.get("optional"):
+            # Original form absent. For optional transforms this is normally just
+            # a version mismatch -> warn and skip. But on a SUPPORTED version it
+            # is a silent regression -> fail loudly. Required transforms: fatal.
+            if t.get("optional") and not fail_closed:
                 warns.append(t["name"] + "?")
                 continue
-            return f"error:{t['name']} not-found (bundle changed? see README)"
+            return (f"error:{t['name']} not-found on supported version "
+                    f"{version_of(path)} (bundle re-minified? re-match it)"
+                    if t.get("optional")
+                    else f"error:{t['name']} not-found (bundle changed? see README)")
         if hits > 1:
-            if t.get("optional"):
+            if t.get("optional") and not fail_closed:
                 warns.append(t["name"] + "x" + str(hits))
                 continue
             return f"error:{t['name']} found-{hits}-times (refusing to guess)"
@@ -278,6 +275,7 @@ def main() -> int:
 
     verb = "restore" if args.restore else "patch"
     changed = 0
+    errors = 0
     for path in paths:
         if args.restore:
             result = restore_one(path, args.dry_run)
@@ -286,12 +284,20 @@ def main() -> int:
         log(f"{label(path)}: {result}")
         if result.startswith("patched") or result.startswith("restored"):
             changed += 1
+        elif result.startswith("error:"):
+            errors += 1
 
     log(f"done ({verb}); {changed} file(s) changed this run"
+        + (f"; {errors} error(s)" if errors else "")
         + (" [dry-run]" if args.dry_run else ""))
     if changed:
         log("reload the VSCode window (Cmd/Ctrl+Shift+P -> 'Reload Window') "
             "to see the change")
+    if errors:
+        # Fail loudly: a supported version that didn't fully patch (or a required
+        # transform that vanished) must not pass silently.
+        log("FAILED: one or more bundles did not patch as expected (see above)")
+        return 1
     return 0
 
 

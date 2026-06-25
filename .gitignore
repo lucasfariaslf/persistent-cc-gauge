@@ -1,3 +1,7 @@
 # Runtime logs written by the patch script / triggers
 scripts/*.log
 *.gauge.tmp
+
+# Python bytecode
+__pycache__/
+*.pyc
