@@ -1,0 +1,10 @@
+.github/**
+test/**
+scripts/**
+eslint.config.js
+.gitignore
+.vscodeignore
+.DS_Store
+**/.DS_Store
+*.vsix
+node_modules/**

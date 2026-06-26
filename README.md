@@ -1,49 +1,46 @@
 # persistent-cc-gauge
 
-The Claude Code VSCode extension only shows the context-usage pie once you pass
-50% of the window. This patches the extension's bundled webview so the gauge is
-always visible, and re-applies itself after every extension update.
+A VS Code extension that keeps the Claude Code context-usage gauge always
+visible, and re-applies itself after Claude Code updates.
+
+The Claude Code extension only shows the context pie next to the chat input once
+you pass 50% of the window. This patches its bundled webview so the gauge shows
+at every usage level, draws a continuous colored arc, and is populated on an
+idle session instead of only after the first reply.
+
+It patches another extension's installed files, so it is not on the Marketplace.
+Install from source.
 
 ## Install
-
-Requires Python 3.
 
 ```bash
 git clone https://github.com/lucasfariaslf/persistent-cc-gauge.git
 cd persistent-cc-gauge
-./install.sh        # Windows: powershell -ExecutionPolicy Bypass -File scripts\install_windows.ps1
+npm run install:local
 ```
 
-Then reload the VSCode window (`Cmd/Ctrl+Shift+P` then "Reload Window").
+Then reload the VS Code window (`Cmd/Ctrl+Shift+P` then "Reload Window").
+`install:local` copies the extension into `~/.vscode/extensions`. To build a
+`.vsix` instead, run `npm run package` and install it with
+`code --install-extension persistent-cc-gauge-*.vsix`.
 
-The installer patches every installed version and wires an auto-repatch trigger
-(LaunchAgent on macOS, systemd `--user` path unit on Linux, Scheduled Task on
-Windows).
+Cursor and Windsurf load VS Code extensions the same way; install there too if
+you use them. For a remote/SSH/WSL window, install into that host.
 
-## Why the auto-repatch
+## How it works
 
-Each extension update installs into a new folder with a fresh, unpatched
-`index.js`, so the patch has to run again. The trigger re-runs the idempotent
-patcher when a new version lands:
+On startup (`onStartupFinished`) the extension patches the Claude Code webview
+bundle, then prompts you to reload. Each Claude Code update ships a fresh,
+unpatched bundle, so re-applying on every startup is what makes the patch
+persist. There is no separate watcher process. Toggle the startup behavior with
+the `persistentCcGauge.enabled` setting, or run it on demand:
 
-```
-extension update -> extensions.json changes -> trigger fires -> patch re-applied
-```
-
-On macOS and Linux the trigger watches `extensions.json` and fires on change.
-Windows has no single-file watcher in Task Scheduler, so it runs at logon and
-every 5 minutes instead; the patch is idempotent, so the repeated runs are
-no-ops once applied.
-
-The trigger keeps patching every future extension version until you run
-`./uninstall.sh`. It re-applies the same patch to whatever the extension ships
-next, without review. The patcher matches on code structure, requires a unique
-match (and refuses otherwise), is standard-library Python, writes atomically,
-and is fully reversible with `--restore`.
+- Persistent CC Gauge: Apply Patch Now
+- Persistent CC Gauge: Revert Patch
 
 ## What it changes
 
-Three transforms on `webview/index.js`:
+Three transforms on the bundle's `webview/index.js`:
 
 | transform        | effect                                                        |
 |------------------|---------------------------------------------------------------|
@@ -51,49 +48,50 @@ Three transforms on `webview/index.js`:
 | continuous-pie   | continuous arc, exact at every %, colored green/yellow/red    |
 | prefetch-context | seeds usage on mount so the gauge shows on an idle session    |
 
-Without continuous-pie the original renderer only has geometry for three coarse
-buckets and draws a half-filled arc at low values; without prefetch-context an
-idle session shows nothing until the first model reply.
+The transforms match the surrounding code structure and capture the minified
+identifiers (function names, JSX helpers, the useEffect alias) rather than
+hardcoding them, so they survive the identifier renames that happen on most
+updates. Each embeds the exact bytes it replaced (base64) in its marker, so
+Revert reconstructs the original. A pristine copy of the bundle is also saved
+once alongside it (`.pcg.bak`) as a safety net.
 
-The patcher reads and writes the bundle as bytes and matches the surrounding
-code structure with regex, capturing the minified identifiers (function names,
-JSX helpers, the useEffect alias) rather than hardcoding them. This survives the
-identifier renames that happen on most extension updates, the same way
-visibility-guard already does. Each transform embeds the exact bytes it replaced
-(base64) in its marker, so `--restore` reconstructs the original byte-for-byte
-without a separate backup. If a future update changes the structure itself, the
-optional transforms skip with `[skipped: ...]` on unknown versions (the gauge
-still shows correct numbers) and fail loudly on versions listed in
-`SUPPORTED_OPTIONAL_VERSIONS`, so a regression is caught rather than silent.
+If a future update changes the structure itself, the optional transforms
+(continuous-pie, prefetch-context) are skipped and the gauge still shows correct
+numbers via the visibility guard; re-match them in `src/patch.js`.
 
 prefetch-context is more than cosmetic: to populate an idle gauge it calls
 `getContextUsage()` on mount, which eagerly launches the Claude core when the
-chat panel opens, even if you never send a message. Drop that transform if you
-do not want it.
+chat panel opens, even if you never send a message. Remove that transform from
+`src/patch.js` if you do not want it.
 
-## Manual use
+## Upgrading from the script version
 
-```bash
-python3 scripts/patch_gauge.py            # apply (idempotent)
-python3 scripts/patch_gauge.py --dry-run  # preview
-python3 scripts/patch_gauge.py --restore  # undo
-./uninstall.sh                            # remove trigger + restore original
-```
-
-Covers VSCode, Insiders, the remote/SSH/WSL server, Cursor, and Windsurf. The
-auto-trigger only watches VSCode stable; re-run manually for the others. Keep
-the clone in place: the trigger and `--restore` both run from it.
+Earlier versions of this tool were a Python script plus an OS watcher
+(LaunchAgent on macOS, a systemd user unit on Linux, a Scheduled Task on
+Windows). Deleting the repo does not remove an already-installed watcher. If you
+used it, remove the watcher: on macOS `launchctl unload` and delete
+`~/Library/LaunchAgents/com.persistent-cc-gauge.plist`; on Linux
+`systemctl --user disable --now persistent-cc-gauge.path`; on Windows delete the
+`ClaudeCodeContextGauge` scheduled task. Then install this extension.
 
 ## Caveats
 
 Unsupported, use at your own risk. This edits a file Anthropic ships inside the
 Claude Code extension, which is not a documented or supported integration point.
 An update can change the bundle structure so the optional transforms stop
-matching, and modifying the extension may affect official support. `--restore`
-rebuilds the original bytes from data embedded in each marker rather than from a
-saved copy; if a bundle is ever left in an unexpected state, reinstall the
-extension.
+matching, and modifying the extension may affect official support. It only
+touches the Claude Code `webview/index.js`; it does not change your code,
+settings, or auth. Not affiliated with Anthropic; check your own obligations
+before using it.
 
-It does not touch your code, settings, or auth, only the extension's
-`webview/index.js`. Writes are atomic. Community tweak, not affiliated with
-Anthropic; check your own obligations before using it.
+## Develop
+
+```bash
+npm install
+npm test     # node --test, unit tests for src/patch.js
+npm run lint
+```
+
+`src/patch.js` holds the pure transform logic (`planPatch` / `planRevert`);
+`extension.js` is the VS Code glue (resolve the bundle, atomic write, backup,
+reload prompt).

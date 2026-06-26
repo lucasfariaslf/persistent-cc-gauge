@@ -1,0 +1,55 @@
+{
+  "name": "persistent-cc-gauge",
+  "displayName": "Persistent CC Gauge",
+  "description": "Keeps the Claude Code context-usage gauge always visible in VS Code, re-applied across extension updates.",
+  "version": "0.1.0",
+  "publisher": "lucaslima",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucasfariaslf/persistent-cc-gauge.git"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "persistentCcGauge.apply",
+        "title": "Persistent CC Gauge: Apply Patch Now"
+      },
+      {
+        "command": "persistentCcGauge.revert",
+        "title": "Persistent CC Gauge: Revert Patch"
+      }
+    ],
+    "configuration": {
+      "title": "Persistent CC Gauge",
+      "properties": {
+        "persistentCcGauge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-apply the patch on every VS Code startup so it survives Claude Code updates."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "eslint .",
+    "package": "vsce package",
+    "install:local": "node scripts/install-local.js"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.0",
+    "eslint": "^9.0.0"
+  }
+}
