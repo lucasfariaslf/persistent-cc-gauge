@@ -37,27 +37,34 @@ no-ops once applied.
 
 The trigger keeps patching every future extension version until you run
 `./uninstall.sh`. It re-applies the same patch to whatever the extension ships
-next, without review. The patcher only swaps exact, unique strings (and refuses
-if a match is not unique), is standard-library Python, writes atomically, and is
-fully reversible with `--restore`.
+next, without review. The patcher matches on code structure, requires a unique
+match (and refuses otherwise), is standard-library Python, writes atomically,
+and is fully reversible with `--restore`.
 
 ## What it changes
 
-Three string transforms on `webview/index.js`, each marked `/*gauge-always*/`
-for idempotency and `--restore`:
+Three transforms on `webview/index.js`:
 
-| transform        | effect                                                        | robust? |
-|------------------|---------------------------------------------------------------|---------|
-| visibility-guard | drops the 50% gate; hides only until real usage is reported   | yes     |
-| continuous-pie   | continuous arc, exact at every %, colored green/yellow/red    | no      |
-| prefetch-context | seeds usage on mount so the gauge shows on an idle session    | no      |
+| transform        | effect                                                        |
+|------------------|---------------------------------------------------------------|
+| visibility-guard | drops the 50% gate; hides only until real usage is reported   |
+| continuous-pie   | continuous arc, exact at every %, colored green/yellow/red    |
+| prefetch-context | seeds usage on mount so the gauge shows on an idle session    |
 
-The last two match minified identifiers that the bundler renames on each
-release. When they stop matching, the patcher skips them (the gauge still shows
-correct numbers, just a coarse pie and no idle prefetch) and prints
-`[skipped: ...]`. Re-match by updating the `orig`/`patched` strings in
-`scripts/patch_gauge.py`; versions in `SUPPORTED_OPTIONAL_VERSIONS` fail loudly
-if they regress instead of skipping silently.
+Without continuous-pie the original renderer only has geometry for three coarse
+buckets and draws a half-filled arc at low values; without prefetch-context an
+idle session shows nothing until the first model reply.
+
+The patcher reads and writes the bundle as bytes and matches the surrounding
+code structure with regex, capturing the minified identifiers (function names,
+JSX helpers, the useEffect alias) rather than hardcoding them. This survives the
+identifier renames that happen on most extension updates, the same way
+visibility-guard already does. Each transform embeds the exact bytes it replaced
+(base64) in its marker, so `--restore` reconstructs the original byte-for-byte
+without a separate backup. If a future update changes the structure itself, the
+optional transforms skip with `[skipped: ...]` on unknown versions (the gauge
+still shows correct numbers) and fail loudly on versions listed in
+`SUPPORTED_OPTIONAL_VERSIONS`, so a regression is caught rather than silent.
 
 prefetch-context is more than cosmetic: to populate an idle gauge it calls
 `getContextUsage()` on mount, which eagerly launches the Claude core when the
@@ -81,10 +88,11 @@ the clone in place: the trigger and `--restore` both run from it.
 
 Unsupported, use at your own risk. This edits a file Anthropic ships inside the
 Claude Code extension, which is not a documented or supported integration point.
-An update can change the bundle so the optional transforms stop matching, and
-modifying the extension may affect official support. `--restore` reverses the
-transforms in place rather than restoring a saved copy; if you ever need a known-
-good bundle, reinstall the extension.
+An update can change the bundle structure so the optional transforms stop
+matching, and modifying the extension may affect official support. `--restore`
+rebuilds the original bytes from data embedded in each marker rather than from a
+saved copy; if a bundle is ever left in an unexpected state, reinstall the
+extension.
 
 It does not touch your code, settings, or auth, only the extension's
 `webview/index.js`. Writes are atomic. Community tweak, not affiliated with
